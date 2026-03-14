@@ -754,11 +754,13 @@ class Boss {
         if (currentBoss > highestBossDefeated) {
             highestBossDefeated = currentBoss;
         }
+        saveGame();
 
         setTimeout(() => {
             currentBoss++;
             if (currentBoss >= 3) {
                 hasBeatenGame = true; // Unlock cosmetics!
+                saveGame();
                 gameState = GAME_STATES.WIN;
                 showScreen('win-screen');
                 document.getElementById('final-hair-points').textContent =
@@ -1775,6 +1777,7 @@ class Porcupine {
             hairPoints += 2;
             showFloatingText('+2 Hair!', this.x, this.y);
             updateUI();
+            saveGame();
         }
     }
 
@@ -2226,6 +2229,7 @@ document.querySelectorAll('.upgrade-button').forEach(btn => {
 
             updateUI();
             updateShopUI();
+            saveGame();
         }
     });
 });
@@ -2244,6 +2248,7 @@ document.querySelectorAll('.cosmetic-button').forEach(btn => {
             // Just equip it
             cosmetics[cosmeticType] = cosmeticValue;
             updateShopUI();
+            saveGame();
         } else if (hairPoints >= cost) {
             // Purchase and equip
             hairPoints -= cost;
@@ -2251,6 +2256,7 @@ document.querySelectorAll('.cosmetic-button').forEach(btn => {
             cosmetics[cosmeticType] = cosmeticValue;
             updateUI();
             updateShopUI();
+            saveGame();
         }
     });
 });
@@ -2267,6 +2273,7 @@ document.querySelectorAll('.weapon-button').forEach(btn => {
             // Just equip it
             equippedWeapon = weapon;
             updateShopUI();
+            saveGame();
         } else if (hairPoints >= cost) {
             // Purchase and equip
             hairPoints -= cost;
@@ -2274,6 +2281,7 @@ document.querySelectorAll('.weapon-button').forEach(btn => {
             equippedWeapon = weapon;
             updateUI();
             updateShopUI();
+            saveGame();
         }
     });
 });
@@ -2313,10 +2321,12 @@ function resetGame(keepUpgrades = false) {
         player.hp = 3;
         player.speed = 2.5;
         player.attackCooldown = 300;
+        clearSave();
     } else {
         // Keep upgrades AND hair points - just reset HP to current max
         player.hp = player.maxHP;
         // hairPoints stays the same
+        saveGame();
     }
 
     boss = null;
@@ -2328,6 +2338,55 @@ function resetGame(keepUpgrades = false) {
     document.getElementById('boss-health-bar-container').style.display = 'none';
 }
 
+// ==================== SAVE / LOAD ====================
+const SAVE_KEY = 'stealYourHair_save';
+
+function saveGame() {
+    const saveData = {
+        hairPoints,
+        purchasedUpgrades,
+        playerMaxHP: player.maxHP,
+        playerSpeed: player.speed,
+        playerAttackCooldown: player.attackCooldown,
+        hasBeatenGame,
+        cosmetics,
+        ownedCosmetics,
+        equippedWeapon,
+        ownedWeapons,
+        highestBossDefeated,
+        currentBoss
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+}
+
+function loadGame() {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    try {
+        const d = JSON.parse(raw);
+        hairPoints = d.hairPoints ?? 0;
+        purchasedUpgrades = d.purchasedUpgrades ?? { maxhp: false, speed: false, attack: false };
+        player.maxHP = d.playerMaxHP ?? 3;
+        player.hp = player.maxHP;
+        player.speed = d.playerSpeed ?? 2.5;
+        player.attackCooldown = d.playerAttackCooldown ?? 300;
+        hasBeatenGame = d.hasBeatenGame ?? false;
+        cosmetics = d.cosmetics ?? { hair: 'default', vehicle: 'none' };
+        ownedCosmetics = d.ownedCosmetics ?? { hair: ['default'], vehicle: ['none'] };
+        equippedWeapon = d.equippedWeapon ?? 'none';
+        ownedWeapons = d.ownedWeapons ?? ['none'];
+        highestBossDefeated = d.highestBossDefeated ?? 0;
+        currentBoss = d.currentBoss ?? 0;
+    } catch (e) {
+        console.warn('Failed to load save data:', e);
+    }
+}
+
+function clearSave() {
+    localStorage.removeItem(SAVE_KEY);
+}
+
 // ==================== INIT ====================
+loadGame();
 updateUI();
 gameLoop();
