@@ -1814,15 +1814,14 @@ function updateCosmeticButtons() {
 function updateShopButton() {
     const shopButton = document.getElementById('shop-access-button');
 
-    // Show shop button during gameplay states, hide during boss fights and screens
-    if (gameState === GAME_STATES.MAP ||
-        gameState === GAME_STATES.SHIP_AREA ||
-        gameState === GAME_STATES.STREAM_AREA ||
-        gameState === GAME_STATES.GUARD_AREA ||
-        gameState === GAME_STATES.BIG_TIME_WORLD) {
-        shopButton.style.display = 'block';
-    } else {
+    // Hide shop button only on non-gameplay screens
+    if (gameState === GAME_STATES.TITLE ||
+        gameState === GAME_STATES.SHOP ||
+        gameState === GAME_STATES.WIN ||
+        gameState === GAME_STATES.LOSE) {
         shopButton.style.display = 'none';
+    } else {
+        shopButton.style.display = 'block';
     }
 }
 
@@ -2657,6 +2656,10 @@ document.getElementById('back-button').addEventListener('click', () => {
     // Return to previous state
     if (stateBeforeShop) {
         gameState = stateBeforeShop;
+        // Restore boss health bar if returning to a fight
+        if (gameState === GAME_STATES.FIGHT) {
+            updateBossHealthBar();
+        }
         stateBeforeShop = null;
         hideAllScreens();
     }
@@ -2666,6 +2669,10 @@ document.getElementById('shop-access-button').addEventListener('click', () => {
     // Save current state and open shop
     stateBeforeShop = gameState;
     gameState = GAME_STATES.SHOP;
+    // Hide boss health bar if pausing mid-fight
+    if (stateBeforeShop === GAME_STATES.FIGHT) {
+        document.getElementById('boss-health-bar-container').style.display = 'none';
+    }
     showScreen('shop-screen');
     updateShopUI();
 });
