@@ -1856,7 +1856,10 @@ function showFloatingText(text, x, y) {
 function updateLoseScreen() {
     const loseScreen = document.getElementById('lose-screen');
 
-    if (previousGameState === GAME_STATES.FIGHT) {
+    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
+        loseScreen.querySelector('p').textContent =
+            'Defeated by Mutant Hair! Return to the computer for more hair points?';
+    } else if (previousGameState === GAME_STATES.FIGHT) {
         const bossNames = ['Ninja Street', 'Shaded Hair', 'Swords', 'Mutant Hair'];
         loseScreen.querySelector('p').textContent =
             `Defeated by ${bossNames[currentBoss]}! Try again?`;
@@ -2658,7 +2661,21 @@ function gameLoop() {
 
 // ==================== EVENT LISTENERS ====================
 document.getElementById('start-button').addEventListener('click', () => {
-    startBossFight();
+    if (currentBoss >= 4) {
+        // Already beaten the game - show win screen
+        gameState = GAME_STATES.WIN;
+        showScreen('win-screen');
+        document.getElementById('final-hair-points').textContent = `Total Hair Points: ${hairPoints}`;
+    } else if (currentBoss === 3) {
+        // Was in The Big Time World or fighting Mutant Hair - send to the computer
+        questState.computerAnswered = false;
+        player.x = 400;
+        player.y = 450;
+        gameState = GAME_STATES.BIG_TIME_WORLD;
+        hideAllScreens();
+    } else {
+        startBossFight();
+    }
 });
 
 document.getElementById('continue-button').addEventListener('click', () => {
@@ -2700,7 +2717,13 @@ document.getElementById('restart-button').addEventListener('click', () => {
     player.reset();
     hideAllScreens();
 
-    if (previousGameState === GAME_STATES.FIGHT) {
+    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
+        // Died against Mutant Hair - send back to computer for another chance at hair points
+        questState.computerAnswered = false;
+        player.x = 400;
+        player.y = 450;
+        gameState = GAME_STATES.BIG_TIME_WORLD;
+    } else if (previousGameState === GAME_STATES.FIGHT) {
         // Died in boss fight - retry the boss
         startBossFight();
     } else if (previousGameState === GAME_STATES.STREAM_AREA) {
