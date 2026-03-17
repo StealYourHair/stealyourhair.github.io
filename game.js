@@ -8,6 +8,7 @@ const GAME_STATES = {
     STREAM_AREA: 'STREAM_AREA',
     GUARD_AREA: 'GUARD_AREA',
     BIG_TIME_WORLD: 'BIG_TIME_WORLD',
+    SCHOOL_AREA: 'SCHOOL_AREA',
     WIN: 'WIN',
     LOSE: 'LOSE'
 };
@@ -54,6 +55,23 @@ let questState = {
     computerAnswered: false
 };
 
+// ==================== SCHOOL LEVEL STATE ====================
+let schoolPhase = 'inside'; // 'inside' | 'outside'
+let schoolEntryTime = 0;
+let schoolBellRung = false;
+let showingWarTransition = false;
+
+// Boss projectiles (used by Spider Spit Bus)
+let bossProjectiles = [];
+let playerInShelter = false;
+
+// Shelter bus positions in the fight arena (center-based coords)
+const SHELTER_BUSES = [
+    { x: 100, y: 300, width: 110, height: 55 },   // left side
+    { x: 700, y: 300, width: 110, height: 55 },   // right side
+    { x: 400, y: 490, width: 110, height: 55 }    // bottom
+];
+
 // ==================== CANVAS SETUP ====================
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -72,7 +90,8 @@ window.addEventListener('keydown', (e) => {
         // Return to map from areas
         if (gameState === GAME_STATES.SHIP_AREA ||
             gameState === GAME_STATES.STREAM_AREA ||
-            gameState === GAME_STATES.GUARD_AREA) {
+            gameState === GAME_STATES.GUARD_AREA ||
+            gameState === GAME_STATES.SCHOOL_AREA) {
             gameState = GAME_STATES.MAP;
             player.x = 400;
             player.y = 300;
@@ -548,6 +567,7 @@ const player = {
     },
 
     attack() {
+        if (playerInShelter) return; // Can't attack from inside a shelter bus
         // Weapon-specific attacks
         if (equippedWeapon === 'sword') {
             // Sword has longer reach
@@ -630,6 +650,7 @@ const player = {
     },
 
     shootArrow() {
+        if (playerInShelter) return; // Can't attack from inside a shelter bus
         let targetX, targetY;
 
         if (boss) {
@@ -846,7 +867,7 @@ class Boss {
 
         setTimeout(() => {
             currentBoss++;
-            if (currentBoss >= 4) {
+            if (currentBoss >= 5) {
                 hasBeatenGame = true; // Unlock cosmetics!
                 saveGame();
                 gameState = GAME_STATES.WIN;
@@ -863,6 +884,17 @@ class Boss {
                 player.x = 400;
                 player.y = 450;
                 gameState = GAME_STATES.BIG_TIME_WORLD;
+                hideAllScreens();
+                document.getElementById('boss-health-bar-container').style.display = 'none';
+            } else if (currentBoss === 4) {
+                // After Boss 4 (Mutant Hair), enter the School
+                schoolPhase = 'inside';
+                schoolEntryTime = Date.now();
+                schoolBellRung = false;
+                showingWarTransition = false;
+                player.x = 400;
+                player.y = 400;
+                gameState = GAME_STATES.SCHOOL_AREA;
                 hideAllScreens();
                 document.getElementById('boss-health-bar-container').style.display = 'none';
             } else {
@@ -1667,6 +1699,236 @@ class MutantHair extends Boss {
     }
 }
 
+// ==================== BOSS 5: SPIDER SPIT BUS ====================
+class SpiderSpitBus extends Boss {
+    constructor() {
+        super('Spider Spit Bus', 15, 22);
+        this.width = 160;
+        this.height = 70;
+        this.x = 400;
+        this.y = 150;
+        this.moveSpeed = 1.2;
+        this.direction = { x: 0.8, y: 0.6 };
+        this.spitTimer = 0;
+        this.spitCooldown = 2500;
+        this.legAngle = 0;
+    }
+
+    update(deltaTime) {
+        this.legAngle += deltaTime * 0.005;
+
+        // Gradually steer toward player
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+            this.direction.x += (dx / dist) * 0.015;
+            this.direction.y += (dy / dist) * 0.015;
+            const len = Math.sqrt(this.direction.x ** 2 + this.direction.y ** 2);
+            this.direction.x /= len;
+            this.direction.y /= len;
+        }
+
+        this.x += this.direction.x * this.moveSpeed;
+        this.y += this.direction.y * this.moveSpeed;
+
+        // Bounce off arena walls
+        if (this.x - this.width / 2 < ARENA.x) {
+            this.direction.x = Math.abs(this.direction.x);
+            this.x = ARENA.x + this.width / 2;
+        }
+        if (this.x + this.width / 2 > ARENA.x + ARENA.width) {
+            this.direction.x = -Math.abs(this.direction.x);
+            this.x = ARENA.x + ARENA.width - this.width / 2;
+        }
+        if (this.y - this.height / 2 < ARENA.y) {
+            this.direction.y = Math.abs(this.direction.y);
+            this.y = ARENA.y + this.height / 2;
+        }
+        if (this.y + this.height / 2 > ARENA.y + ARENA.height) {
+            this.direction.y = -Math.abs(this.direction.y);
+            this.y = ARENA.y + ARENA.height - this.height / 2;
+        }
+
+        // Spit attack - only when player is not sheltered
+        this.spitTimer += deltaTime;
+        if (this.spitTimer >= this.spitCooldown) {
+            this.spitTimer = 0;
+            if (!playerInShelter) {
+                // Spit 3 globs in a fan
+                bossProjectiles.push(new SpitGlob(this.x, this.y, player.x, player.y));
+                bossProjectiles.push(new SpitGlob(this.x, this.y, player.x + 50, player.y + 30));
+                bossProjectiles.push(new SpitGlob(this.x, this.y, player.x - 50, player.y - 30));
+            }
+        }
+
+        this.checkPlayerCollision();
+    }
+
+    draw() {
+        super.draw();
+        const isHit = Date.now() < this.hitFlashUntil;
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // Spider legs (4 pairs, along the bottom of the bus)
+        const legXPositions = [-55, -18, 18, 55];
+        ctx.strokeStyle = isHit ? '#fff' : '#1a0a00';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 4; i++) {
+            const ox = legXPositions[i];
+            const wave = Math.sin(this.legAngle + i * 0.8) * 10;
+
+            // Left leg
+            ctx.beginPath();
+            ctx.moveTo(ox, 28);
+            ctx.lineTo(ox - 30, 50 + wave);
+            ctx.lineTo(ox - 55, 68 + wave);
+            ctx.stroke();
+
+            // Right leg
+            ctx.beginPath();
+            ctx.moveTo(ox, 28);
+            ctx.lineTo(ox + 30, 50 - wave);
+            ctx.lineTo(ox + 55, 68 - wave);
+            ctx.stroke();
+        }
+
+        // Bus body
+        ctx.shadowColor = isHit ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 18;
+        const busGrad = ctx.createLinearGradient(0, -35, 0, 35);
+        if (isHit) {
+            busGrad.addColorStop(0, '#ffffff');
+            busGrad.addColorStop(1, '#f0f0f0');
+        } else {
+            busGrad.addColorStop(0, '#ffe033');
+            busGrad.addColorStop(1, '#c9a800');
+        }
+        ctx.fillStyle = busGrad;
+        ctx.fillRect(-80, -35, 160, 63);
+        ctx.strokeStyle = isHit ? '#fff' : '#8a6a00';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(-80, -35, 160, 63);
+
+        // 8 creepy eyes across the top of the bus
+        const eyeXs = [-65, -47, -29, -11, 8, 26, 44, 62];
+        eyeXs.forEach((ex, i) => {
+            // Eye white
+            ctx.shadowColor = '#ff0000';
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = isHit ? '#ddd' : '#fff';
+            ctx.beginPath();
+            ctx.ellipse(ex, -18, 9, 7, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Pupil tracking player
+            const pdx = player.x - this.x;
+            const pdy = player.y - this.y;
+            const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+            const px = ex + (pdx / pdist) * 4;
+            const py = -18 + (pdy / pdist) * 3;
+            ctx.fillStyle = i % 2 === 0 ? '#ff0000' : '#cc0044';
+            ctx.beginPath();
+            ctx.ellipse(px, py, 5, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // Front of bus (menacing grille / mouth)
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = isHit ? '#ccc' : '#222';
+        ctx.fillRect(66, -28, 14, 56);
+        // Grille teeth
+        ctx.fillStyle = isHit ? '#eee' : '#ffd700';
+        for (let i = 0; i < 5; i++) {
+            ctx.fillRect(68, -22 + i * 11, 10, 6);
+        }
+
+        // "SCHOOL BUS" text on side
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = isHit ? '#777' : '#000';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('SCHOOL BUS', 0, 8);
+
+        ctx.restore();
+
+        // HP bar
+        const barWidth = 160;
+        const barHeight = 12;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(this.x - barWidth / 2, this.y - 65, barWidth, barHeight);
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(this.x - barWidth / 2, this.y - 65, barWidth * (this.hp / this.maxHP), barHeight);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(this.name, this.x, this.y - 72);
+    }
+}
+
+// ==================== SPIT GLOB (boss projectile) ====================
+class SpitGlob {
+    constructor(x, y, targetX, targetY) {
+        this.x = x;
+        this.y = y;
+        const dx = targetX - x;
+        const dy = targetY - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        this.dx = dx / dist;
+        this.dy = dy / dist;
+        this.speed = 4.5;
+        this.width = 18;
+        this.height = 18;
+        this.active = true;
+        this.wobble = Math.random() * Math.PI * 2; // random wobble phase
+    }
+
+    update() {
+        this.wobble += 0.15;
+        this.x += this.dx * this.speed + Math.sin(this.wobble) * 0.5;
+        this.y += this.dy * this.speed;
+
+        // Deactivate if out of arena
+        if (this.x < ARENA.x - 30 || this.x > ARENA.x + ARENA.width + 30 ||
+            this.y < ARENA.y - 30 || this.y > ARENA.y + ARENA.height + 30) {
+            this.active = false;
+        }
+
+        // Hit player only if not sheltered
+        if (!playerInShelter && checkCollision(this, player)) {
+            player.takeDamage(1);
+            this.active = false;
+        }
+    }
+
+    draw() {
+        ctx.save();
+        ctx.shadowColor = '#7cfc00';
+        ctx.shadowBlur = 10;
+
+        // Main glob
+        const g = ctx.createRadialGradient(this.x - 3, this.y - 3, 2, this.x, this.y, 9);
+        g.addColorStop(0, '#ccff44');
+        g.addColorStop(1, '#3a7000');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 9, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Drip blob
+        ctx.shadowBlur = 4;
+        ctx.fillStyle = 'rgba(100, 200, 0, 0.75)';
+        ctx.beginPath();
+        ctx.arc(this.x + this.dx * 6, this.y + this.dy * 6, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
 // ==================== COLLISION DETECTION ====================
 function checkCollision(obj1, obj2) {
     return obj1.x - obj1.width/2 < obj2.x + obj2.width/2 &&
@@ -1856,11 +2118,14 @@ function showFloatingText(text, x, y) {
 function updateLoseScreen() {
     const loseScreen = document.getElementById('lose-screen');
 
-    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
+    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 4) {
+        loseScreen.querySelector('p').textContent =
+            'Spit on by the Spider Spit Bus! Use the shelter buses next time?';
+    } else if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
         loseScreen.querySelector('p').textContent =
             'Defeated by Mutant Hair! Return to the computer for more hair points?';
     } else if (previousGameState === GAME_STATES.FIGHT) {
-        const bossNames = ['Ninja Street', 'Shaded Hair', 'Swords', 'Mutant Hair'];
+        const bossNames = ['Ninja Street', 'Shaded Hair', 'Swords', 'Mutant Hair', 'Spider Spit Bus'];
         loseScreen.querySelector('p').textContent =
             `Defeated by ${bossNames[currentBoss]}! Try again?`;
     } else if (previousGameState === GAME_STATES.STREAM_AREA) {
@@ -2221,6 +2486,308 @@ function drawBigTimeWorldArea() {
         ctx.font = 'bold 20px Arial';
         ctx.fillText('MUTANT HAIR IS COMING!', canvas.width / 2, canvas.height / 2 + 20);
     }
+}
+
+// ==================== SCHOOL AREA DRAW ====================
+function drawSchoolBus(x, y, isWar) {
+    // Tires
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(x - 40, y + 33, 12, 0, Math.PI * 2);
+    ctx.arc(x + 30, y + 33, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#666';
+    ctx.beginPath();
+    ctx.arc(x - 40, y + 33, 6, 0, Math.PI * 2);
+    ctx.arc(x + 30, y + 33, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bus body
+    ctx.fillStyle = isWar ? '#ffaa00' : '#FFD700';
+    ctx.fillRect(x - 70, y - 30, 140, 62);
+    ctx.strokeStyle = isWar ? '#bb7700' : '#a87a00';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x - 70, y - 30, 140, 62);
+
+    // Windows
+    ctx.fillStyle = isWar ? 'rgba(80,0,0,0.7)' : '#a8d4f5';
+    for (let w = 0; w < 4; w++) {
+        ctx.fillRect(x - 58 + w * 30, y - 22, 22, 18);
+    }
+
+    // Bus front
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x + 60, y - 25, 10, 48);
+
+    // Label on side
+    ctx.fillStyle = isWar ? '#ff2200' : '#000';
+    ctx.font = isWar ? 'bold 11px Arial' : '10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(isWar ? 'BUS #4' : 'SCHOOL BUS', x - 5, y + 8);
+}
+
+function drawShelterBuses() {
+    SHELTER_BUSES.forEach(sb => {
+        const inside = checkCollision(player, sb);
+
+        // Glow when player is inside
+        if (inside) {
+            ctx.shadowColor = '#00ff88';
+            ctx.shadowBlur = 20;
+        }
+
+        // Bus body
+        ctx.fillStyle = inside ? '#ffe566' : '#FFD700';
+        ctx.fillRect(sb.x - sb.width / 2, sb.y - sb.height / 2, sb.width, sb.height);
+        ctx.strokeStyle = inside ? '#00ff88' : '#a87a00';
+        ctx.lineWidth = inside ? 3 : 2;
+        ctx.strokeRect(sb.x - sb.width / 2, sb.y - sb.height / 2, sb.width, sb.height);
+        ctx.shadowBlur = 0;
+
+        // Windows
+        ctx.fillStyle = '#a8d4f5';
+        for (let w = 0; w < 3; w++) {
+            ctx.fillRect(sb.x - sb.width / 2 + 10 + w * 32, sb.y - sb.height / 2 + 8, 22, 15);
+        }
+
+        // Label
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('SHELTER', sb.x, sb.y + 6);
+
+        // Prompt when nearby
+        const dx = player.x - sb.x;
+        const dy = player.y - sb.y;
+        if (Math.sqrt(dx * dx + dy * dy) < 90 && !inside) {
+            ctx.fillStyle = '#00ff88';
+            ctx.font = '11px Arial';
+            ctx.fillText('Walk in for safety', sb.x, sb.y - sb.height / 2 - 6);
+        }
+    });
+}
+
+function drawSchoolArea() {
+    if (showingWarTransition) {
+        // Full-screen "THE WAR" reveal
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ff0000';
+        ctx.font = 'bold 90px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('THE WAR', canvas.width / 2, canvas.height / 2 - 10);
+        ctx.fillStyle = '#ff6600';
+        ctx.font = 'bold 22px Arial';
+        ctx.fillText('The bus is transforming...', canvas.width / 2, canvas.height / 2 + 55);
+        return;
+    }
+
+    if (schoolPhase === 'inside') {
+        drawSchoolInterior();
+    } else {
+        drawSchoolExterior();
+    }
+}
+
+function drawSchoolInterior() {
+    // Classroom wall
+    ctx.fillStyle = '#e8d5b7';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Floor
+    ctx.fillStyle = '#c8a87a';
+    ctx.fillRect(0, 440, canvas.width, 160);
+
+    // Blackboard
+    ctx.fillStyle = '#2d5a27';
+    ctx.fillRect(150, 40, 500, 140);
+    ctx.strokeStyle = '#5c3a1e';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(146, 36, 508, 148);
+    // Chalk text
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 26px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('MATH CLASS', canvas.width / 2, 90);
+    ctx.font = '18px Arial';
+    ctx.fillText('2 + 2 = 4     3 × 3 = 9', canvas.width / 2, 125);
+    ctx.fillText('No talking during class!', canvas.width / 2, 155);
+
+    // Desks (3 rows × 4 cols)
+    ctx.fillStyle = '#8B6914';
+    for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 4; col++) {
+            ctx.fillRect(100 + col * 165, 240 + row * 65, 65, 38);
+            // Desk leg
+            ctx.fillStyle = '#5a4010';
+            ctx.fillRect(115 + col * 165, 276, 8, 12);
+            ctx.fillRect(148 + col * 165, 276, 8, 12);
+            ctx.fillStyle = '#8B6914';
+        }
+    }
+
+    // Teacher
+    ctx.fillStyle = '#3a5a8a';
+    ctx.fillRect(355, 200, 35, 50); // Body
+    ctx.fillStyle = '#fdbcb4';
+    ctx.beginPath();
+    ctx.arc(372, 192, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(367, 188, 3, 0, Math.PI * 2);
+    ctx.arc(378, 188, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Door at bottom center
+    ctx.fillStyle = '#7a4a20';
+    ctx.fillRect(360, 455, 80, 105);
+    ctx.strokeStyle = '#5a3010';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(360, 455, 80, 105);
+    ctx.fillStyle = '#daa520';
+    ctx.beginPath();
+    ctx.arc(430, 510, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('EXIT', 400, 448);
+
+    // Recess countdown / bell state
+    const elapsed = Date.now() - schoolEntryTime;
+    if (!schoolBellRung) {
+        const timeLeft = Math.max(0, Math.ceil((4000 - elapsed) / 1000));
+        if (elapsed >= 4000) {
+            schoolBellRung = true;
+        }
+        ctx.fillStyle = '#444';
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Recess in ${timeLeft} second${timeLeft !== 1 ? 's' : ''}...`, canvas.width / 2, 420);
+    } else {
+        // Bell rang!
+        ctx.fillStyle = '#ff6600';
+        ctx.font = 'bold 26px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('DING DING!  RECESS TIME!', canvas.width / 2, 415);
+        ctx.fillStyle = '#222';
+        ctx.font = '17px Arial';
+        ctx.fillText('Press SPACE to go outside', canvas.width / 2, 445);
+
+        if (keys.space) {
+            schoolPhase = 'outside';
+            player.x = 400;
+            player.y = 310;
+        }
+    }
+}
+
+function drawSchoolExterior() {
+    // Sky
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(0, 0, canvas.width, 280);
+
+    // School building facade
+    ctx.fillStyle = '#b8b8cc';
+    ctx.fillRect(80, 10, 640, 260);
+    ctx.strokeStyle = '#8888aa';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(80, 10, 640, 260);
+
+    // School sign
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('ELEMENTARY SCHOOL', canvas.width / 2, 55);
+
+    // Building windows
+    ctx.fillStyle = '#a8d4f5';
+    for (let i = 0; i < 5; i++) {
+        ctx.fillRect(120 + i * 118, 80, 65, 50);
+        ctx.strokeStyle = '#777';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(120 + i * 118, 80, 65, 50);
+        // Cross panes
+        ctx.beginPath();
+        ctx.moveTo(152 + i * 118, 80);
+        ctx.lineTo(152 + i * 118, 130);
+        ctx.moveTo(120 + i * 118, 105);
+        ctx.lineTo(185 + i * 118, 105);
+        ctx.stroke();
+    }
+
+    // Front door of school
+    ctx.fillStyle = '#5a3010';
+    ctx.fillRect(360, 170, 80, 100);
+    ctx.fillStyle = '#daa520';
+    ctx.beginPath();
+    ctx.arc(430, 224, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Parking lot / ground
+    ctx.fillStyle = '#888';
+    ctx.fillRect(0, 270, canvas.width, 330);
+
+    // Parking lane lines
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([18, 10]);
+    for (let i = 1; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * 160, 270);
+        ctx.lineTo(i * 160, 600);
+        ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // "RECESS!" banner
+    ctx.fillStyle = '#ff8800';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('RECESS!', canvas.width / 2, 30);
+
+    // Draw 4 buses
+    const busDefs = [
+        { x: 140, y: 380, isWar: false },
+        { x: 400, y: 380, isWar: false },
+        { x: 660, y: 380, isWar: false },
+        { x: 400, y: 510, isWar: true }
+    ];
+
+    busDefs.forEach(bd => {
+        drawSchoolBus(bd.x, bd.y, bd.isWar);
+
+        // Proximity prompt
+        const dx = player.x - bd.x;
+        const dy = player.y - bd.y;
+        const nearBus = Math.sqrt(dx * dx + dy * dy) < 65;
+        if (nearBus) {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Press SPACE to board', bd.x, bd.y - 55);
+
+            if (keys.space && !showingWarTransition) {
+                if (bd.isWar) {
+                    // Trigger "The War" → boss fight
+                    showingWarTransition = true;
+                    setTimeout(() => {
+                        showingWarTransition = false;
+                        startBossFight();
+                    }, 3000);
+                } else {
+                    showFloatingText('Hiding inside...', bd.x, bd.y - 70);
+                }
+            }
+        }
+    });
+
+    // Player draw is handled by game loop; just show instructions
+    ctx.fillStyle = '#111';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press ESC to return to map', canvas.width / 2, canvas.height - 10);
 }
 
 // ==================== PORCUPINE ENEMY ====================
@@ -2596,6 +3163,7 @@ function createBoss(index) {
         case 1: return new ShadedHair();
         case 2: return new Swords();
         case 3: return new MutantHair();
+        case 4: return new SpiderSpitBus();
         default: return null;
     }
 }
@@ -2603,6 +3171,8 @@ function createBoss(index) {
 function startBossFight() {
     boss = createBoss(currentBoss);
     player.reset();
+    bossProjectiles = [];
+    playerInShelter = false;
     gameState = GAME_STATES.FIGHT;
     hideAllScreens();
     updateBossHealthBar();
@@ -2640,6 +3210,12 @@ function gameLoop() {
         drawBigTimeWorldArea();
         player.update(deltaTime);
         player.draw();
+    } else if (gameState === GAME_STATES.SCHOOL_AREA) {
+        drawSchoolArea();
+        if (!showingWarTransition) {
+            player.update(deltaTime);
+            player.draw();
+        }
     } else if (gameState === GAME_STATES.FIGHT) {
         // Draw arena
         ctx.strokeStyle = '#ecf0f1';
@@ -2648,11 +3224,38 @@ function gameLoop() {
         ctx.fillStyle = '#34495e';
         ctx.fillRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
 
+        // Draw shelter buses for the Spider Spit Bus fight
+        if (currentBoss === 4) {
+            drawShelterBuses();
+        }
+
         if (boss && !boss.defeated) {
+            // Check if player is sheltered (before update so attack guard is current)
+            if (currentBoss === 4) {
+                playerInShelter = SHELTER_BUSES.some(sb => checkCollision(player, sb));
+            } else {
+                playerInShelter = false;
+            }
+
             boss.update(deltaTime);
             boss.draw();
+
+            // Update and draw boss projectiles
+            bossProjectiles = bossProjectiles.filter(p => p.active);
+            bossProjectiles.forEach(p => { p.update(); p.draw(); });
+
             player.update(deltaTime);
             player.draw();
+
+            // Shelter status overlay
+            if (playerInShelter) {
+                ctx.fillStyle = 'rgba(0,220,100,0.12)';
+                ctx.fillRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
+                ctx.fillStyle = '#00dd66';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('SHELTERED — Can\'t attack from here!', canvas.width / 2, ARENA.y + 28);
+            }
         }
     }
 
@@ -2661,11 +3264,21 @@ function gameLoop() {
 
 // ==================== EVENT LISTENERS ====================
 document.getElementById('start-button').addEventListener('click', () => {
-    if (currentBoss >= 4) {
+    if (currentBoss >= 5) {
         // Already beaten the game - show win screen
         gameState = GAME_STATES.WIN;
         showScreen('win-screen');
         document.getElementById('final-hair-points').textContent = `Total Hair Points: ${hairPoints}`;
+    } else if (currentBoss === 4) {
+        // Was in or fighting Spider Spit Bus - send to school area
+        schoolPhase = 'inside';
+        schoolEntryTime = Date.now();
+        schoolBellRung = false;
+        showingWarTransition = false;
+        player.x = 400;
+        player.y = 400;
+        gameState = GAME_STATES.SCHOOL_AREA;
+        hideAllScreens();
     } else if (currentBoss === 3) {
         // Was in The Big Time World or fighting Mutant Hair - send to the computer
         questState.computerAnswered = false;
@@ -2717,7 +3330,16 @@ document.getElementById('restart-button').addEventListener('click', () => {
     player.reset();
     hideAllScreens();
 
-    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
+    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 4) {
+        // Died against Spider Spit Bus - send back to school outside
+        schoolPhase = 'outside';
+        schoolEntryTime = Date.now();
+        schoolBellRung = true;
+        showingWarTransition = false;
+        player.x = 400;
+        player.y = 310;
+        gameState = GAME_STATES.SCHOOL_AREA;
+    } else if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
         // Died against Mutant Hair - send back to computer for another chance at hair points
         questState.computerAnswered = false;
         player.x = 400;
@@ -2847,6 +3469,14 @@ function resetGame(keepUpgrades = false) {
         iceBlockBroken: false,
         computerAnswered: false
     };
+
+    // Reset school state
+    schoolPhase = 'inside';
+    schoolEntryTime = 0;
+    schoolBellRung = false;
+    showingWarTransition = false;
+    bossProjectiles = [];
+    playerInShelter = false;
 
     if (!keepUpgrades) {
         // Full reset - lose everything
