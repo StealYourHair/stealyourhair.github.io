@@ -32,6 +32,7 @@ jobs:
           cp /tmp/mobile-preview/index.html mobile-test/
           cp /tmp/mobile-preview/style.css  mobile-test/
           cp /tmp/mobile-preview/game.js    mobile-test/
+          touch mobile-test/.nojekyll
 
           # Commit and push only if something changed
           git add mobile-test/
