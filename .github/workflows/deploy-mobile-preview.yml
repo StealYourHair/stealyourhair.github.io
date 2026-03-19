@@ -1,0 +1,40 @@
+name: Deploy Mobile Preview
+
+on:
+  push:
+    branches: [worktree-mobile-controls]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout mobile branch
+        uses: actions/checkout@v4
+
+      - name: Copy game files into mobile-test/ on main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Save the files to deploy
+          mkdir -p /tmp/mobile-preview
+          cp index.html style.css game.js /tmp/mobile-preview/
+
+          # Switch to main
+          git fetch origin main
+          git checkout main
+
+          # Update mobile-test/ directory
+          mkdir -p mobile-test
+          cp /tmp/mobile-preview/index.html mobile-test/
+          cp /tmp/mobile-preview/style.css  mobile-test/
+          cp /tmp/mobile-preview/game.js    mobile-test/
+
+          # Commit and push only if something changed
+          git add mobile-test/
+          git diff --staged --quiet \
+            && echo "No changes to deploy." \
+            || (git commit -m "chore: update mobile-test preview [skip ci]" && git push origin main)

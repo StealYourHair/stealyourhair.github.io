@@ -26,15 +26,33 @@
         <!-- Canvas -->
         <canvas id="gameCanvas" width="800" height="600"></canvas>
 
+        <!-- Mobile Controls (shown only on touch devices via JS) -->
+        <div id="mobile-controls">
+            <!-- Left: Virtual joystick -->
+            <div id="joystick-zone">
+                <div id="joystick-base">
+                    <div id="joystick-handle"></div>
+                </div>
+            </div>
+            <!-- Right: Action buttons -->
+            <div id="action-buttons">
+                <div id="btn-back" class="mobile-btn">ESC</div>
+                <div id="btn-quiz-container">
+                    <div id="btn-4" class="mobile-btn quiz-btn">4</div>
+                    <div id="btn-5" class="mobile-btn quiz-btn">5</div>
+                </div>
+                <div id="btn-shoot" class="mobile-btn">SHOOT</div>
+                <div id="btn-attack" class="mobile-btn">ATTACK</div>
+            </div>
+        </div>
+
         <!-- Game Screens -->
         <div id="title-screen" class="screen">
             <h2>STEAL YOUR HAIR!</h2>
             <p>Defeat bosses and steal their hair!</p>
             <div style="margin: 20px 0; font-size: 0.9em; text-align: left;">
-                <p><strong>Controls:</strong></p>
-                <p>🎮 Move: WASD</p>
-                <p>⚔️ Melee Attack: SPACE</p>
-                <p>🏹 Shoot Arrow: SHIFT or E</p>
+                <p><strong>Keyboard:</strong> WASD to move, SPACE to attack, SHIFT/E to shoot</p>
+                <p><strong>Touch:</strong> Joystick to move, ATTACK / SHOOT buttons</p>
             </div>
             <button id="start-button" class="game-button">START GAME</button>
         </div>

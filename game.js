@@ -109,6 +109,13 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
+// Touch joystick state (read by player.update; written by mobile controls setup at bottom of file)
+const touchJoystick = { active: false, touchId: null, startX: 0, startY: 0, dx: 0, dy: 0 };
+
+function isTouchDevice() {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+
 // ==================== ARROW CLASS ====================
 class Arrow {
     constructor(x, y, targetX, targetY) {
@@ -524,6 +531,9 @@ const player = {
         if (keys.s || keys.arrowdown) dy += 1;
         if (keys.a || keys.arrowleft) dx -= 1;
         if (keys.d || keys.arrowright) dx += 1;
+        // Touch joystick (analog, adds on top of any keyboard input)
+        dx += touchJoystick.dx;
+        dy += touchJoystick.dy;
 
         // Normalize diagonal movement
         if (dx !== 0 && dy !== 0) {
@@ -3192,6 +3202,7 @@ function gameLoop() {
 
     // Update shop button visibility
     updateShopButton();
+    updateMobileControls();
 
     if (gameState === GAME_STATES.MAP) {
         drawMap();
@@ -3555,3 +3566,119 @@ function clearSave() {
 loadGame();
 updateUI();
 gameLoop();
+
+// ==================== MOBILE / TOUCH CONTROLS ====================
+function updateMobileControls() {
+    if (!isTouchDevice()) return;
+    const overlay  = document.getElementById('mobile-controls');
+    const quizBtns = document.getElementById('btn-quiz-container');
+    if (!overlay) return;
+
+    const activeStates = [
+        GAME_STATES.FIGHT, GAME_STATES.MAP, GAME_STATES.SHIP_AREA,
+        GAME_STATES.STREAM_AREA, GAME_STATES.GUARD_AREA,
+        GAME_STATES.BIG_TIME_WORLD, GAME_STATES.SCHOOL_AREA
+    ];
+    overlay.style.display = activeStates.includes(gameState) ? 'flex' : 'none';
+
+    // Quiz buttons only visible when near the computer in Big Time World
+    if (quizBtns) {
+        quizBtns.style.display =
+            (gameState === GAME_STATES.BIG_TIME_WORLD && !questState.computerAnswered) ? 'flex' : 'none';
+    }
+}
+
+function scaleGameToFit() {
+    if (!isTouchDevice()) return;
+    const container = document.getElementById('game-container');
+    const scale = Math.min(window.innerWidth / 840, window.innerHeight / 820, 1);
+    container.style.transformOrigin = 'top center';
+    container.style.transform = `scale(${scale})`;
+    document.body.style.minHeight = `${820 * scale}px`;
+}
+
+(function setupMobileControls() {
+    const joystickZone   = document.getElementById('joystick-zone');
+    const joystickHandle = document.getElementById('joystick-handle');
+    const JOYSTICK_MAX   = 45;
+
+    // --- Joystick ---
+    joystickZone.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (touchJoystick.active) return;
+        const t    = e.changedTouches[0];
+        const rect = joystickZone.getBoundingClientRect();
+        touchJoystick.active  = true;
+        touchJoystick.touchId = t.identifier;
+        touchJoystick.startX  = rect.left + rect.width  / 2;
+        touchJoystick.startY  = rect.top  + rect.height / 2;
+        touchJoystick.dx = 0;
+        touchJoystick.dy = 0;
+    }, { passive: false });
+
+    joystickZone.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            if (t.identifier !== touchJoystick.touchId) continue;
+            const rawDx   = t.clientX - touchJoystick.startX;
+            const rawDy   = t.clientY - touchJoystick.startY;
+            const dist    = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+            const angle   = Math.atan2(rawDy, rawDx);
+            const clamped = Math.min(dist, JOYSTICK_MAX);
+            touchJoystick.dx = (clamped / JOYSTICK_MAX) * Math.cos(angle);
+            touchJoystick.dy = (clamped / JOYSTICK_MAX) * Math.sin(angle);
+            joystickHandle.style.transform =
+                `translate(calc(-50% + ${Math.cos(angle) * clamped}px), calc(-50% + ${Math.sin(angle) * clamped}px))`;
+        }
+    }, { passive: false });
+
+    function resetJoystick() {
+        touchJoystick.active  = false;
+        touchJoystick.touchId = null;
+        touchJoystick.dx = 0;
+        touchJoystick.dy = 0;
+        joystickHandle.style.transform = 'translate(-50%, -50%)';
+    }
+    joystickZone.addEventListener('touchend',    (e) => { e.preventDefault(); for (const t of e.changedTouches) { if (t.identifier === touchJoystick.touchId) resetJoystick(); } }, { passive: false });
+    joystickZone.addEventListener('touchcancel', resetJoystick);
+
+    // --- Action buttons ---
+    function addMobileButton(id, onDown, onUp) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('touchstart',  (e) => { e.preventDefault(); onDown(); }, { passive: false });
+        el.addEventListener('touchend',    (e) => { e.preventDefault(); onUp();   }, { passive: false });
+        el.addEventListener('touchcancel', onUp);
+    }
+
+    addMobileButton('btn-attack', () => { keys.space = true;  },
+                                  () => { keys.space = false; });
+    addMobileButton('btn-shoot',  () => { keys.shift = true;  keys.e = true;  },
+                                  () => { keys.shift = false; keys.e = false; });
+    addMobileButton('btn-4',      () => { keys['4'] = true;  }, () => { keys['4'] = false; });
+    addMobileButton('btn-5',      () => { keys['5'] = true;  }, () => { keys['5'] = false; });
+
+    // Back button — mirrors the Escape key logic
+    const btnBack = document.getElementById('btn-back');
+    btnBack.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys.escape = true;
+        if (gameState === GAME_STATES.SHIP_AREA  ||
+            gameState === GAME_STATES.STREAM_AREA ||
+            gameState === GAME_STATES.GUARD_AREA  ||
+            gameState === GAME_STATES.SCHOOL_AREA) {
+            gameState = GAME_STATES.MAP;
+            player.x  = 400;
+            player.y  = 300;
+        }
+    }, { passive: false });
+    btnBack.addEventListener('touchend',    (e) => { e.preventDefault(); keys.escape = false; }, { passive: false });
+    btnBack.addEventListener('touchcancel', ()  => { keys.escape = false; });
+
+    // Show overlay & scale only on touch devices
+    if (isTouchDevice()) {
+        document.getElementById('mobile-controls').style.display = 'flex';
+        scaleGameToFit();
+        window.addEventListener('resize', scaleGameToFit);
+    }
+})();
