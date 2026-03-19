@@ -10,7 +10,8 @@ const GAME_STATES = {
     BIG_TIME_WORLD: 'BIG_TIME_WORLD',
     SCHOOL_AREA: 'SCHOOL_AREA',
     WIN: 'WIN',
-    LOSE: 'LOSE'
+    LOSE: 'LOSE',
+    MARS_WORLD: 'MARS_WORLD'
 };
 
 const ARENA = {
@@ -55,6 +56,11 @@ let questState = {
     computerAnswered: false
 };
 
+// ==================== MARS WORLD STATE ====================
+let marsPhase = 'explore'; // 'explore' | 'button_pressed'
+let marsButtonPressed = false;
+let showingMarsTransition = false;
+
 // ==================== SCHOOL LEVEL STATE ====================
 let schoolPhase = 'inside'; // 'inside' | 'outside'
 let schoolEntryTime = 0;
@@ -64,6 +70,9 @@ let showingWarTransition = false;
 // Boss projectiles (used by Spider Spit Bus)
 let bossProjectiles = [];
 let playerInShelter = false;
+
+// Mars house shelter position in the fight arena (center-based coords)
+const MARS_FIGHT_HOUSE = { x: 140, y: 325, width: 120, height: 100 };
 
 // Shelter bus positions in the fight arena (center-based coords)
 const SHELTER_BUSES = [
@@ -867,13 +876,24 @@ class Boss {
 
         setTimeout(() => {
             currentBoss++;
-            if (currentBoss >= 5) {
+            if (currentBoss >= 6) {
                 hasBeatenGame = true; // Unlock cosmetics!
                 saveGame();
                 gameState = GAME_STATES.WIN;
                 showScreen('win-screen');
                 document.getElementById('final-hair-points').textContent =
                     `Total Hair Points: ${hairPoints}`;
+            } else if (currentBoss === 5) {
+                // After Boss 4 (Spider Spit Bus) defeated, head to Mars!
+                marsPhase = 'explore';
+                marsButtonPressed = false;
+                showingMarsTransition = false;
+                playerInShelter = false;
+                player.x = 150;
+                player.y = 380;
+                gameState = GAME_STATES.MARS_WORLD;
+                hideAllScreens();
+                document.getElementById('boss-health-bar-container').style.display = 'none';
             } else if (currentBoss === 1) {
                 // After Boss 1, go to MAP (world exploration)
                 gameState = GAME_STATES.MAP;
@@ -1929,6 +1949,195 @@ class SpitGlob {
     }
 }
 
+// ==================== LAVA GLOB PROJECTILE ====================
+class LavaGlob {
+    constructor(x, y, targetX, targetY) {
+        this.x = x;
+        this.y = y;
+        const dx = targetX - x;
+        const dy = targetY - y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        this.dx = dx / dist;
+        this.dy = dy / dist;
+        this.speed = 3.8;
+        this.width = 16;
+        this.height = 16;
+        this.active = true;
+        this.angle = Math.random() * Math.PI * 2;
+    }
+
+    update() {
+        this.angle += 0.12;
+        this.x += this.dx * this.speed;
+        this.y += this.dy * this.speed;
+
+        if (this.x < ARENA.x - 30 || this.x > ARENA.x + ARENA.width + 30 ||
+            this.y < ARENA.y - 30 || this.y > ARENA.y + ARENA.height + 30) {
+            this.active = false;
+        }
+
+        if (!playerInShelter && checkCollision(this, player)) {
+            player.takeDamage(1);
+            this.active = false;
+        }
+    }
+
+    draw() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.shadowColor = '#ff6600';
+        ctx.shadowBlur = 14;
+        // Outer glow
+        const g = ctx.createRadialGradient(0, 0, 2, 0, 0, 8);
+        g.addColorStop(0, '#ffcc00');
+        g.addColorStop(0.5, '#ff4400');
+        g.addColorStop(1, '#881100');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+        // Hot core
+        ctx.fillStyle = '#ffee88';
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+// ==================== MARS VOLCANO BOSS ====================
+class MarsVolcanoBoss extends Boss {
+    constructor() {
+        super('Volcano Beast', 20, 30);
+        this.width = 75;
+        this.height = 75;
+        this.x = 500;
+        this.y = 300;
+        this.moveSpeed = 1.4;
+        this.direction = { x: -0.8, y: 0.4 };
+        this.shootTimer = 0;
+        this.shootCooldown = 2200;
+        this.rockAngle = 0;
+    }
+
+    update(deltaTime) {
+        this.rockAngle += deltaTime * 0.002;
+
+        // Gradually steer toward player
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+            this.direction.x += (dx / dist) * 0.018;
+            this.direction.y += (dy / dist) * 0.018;
+            const len = Math.sqrt(this.direction.x ** 2 + this.direction.y ** 2);
+            this.direction.x /= len;
+            this.direction.y /= len;
+        }
+
+        this.x += this.direction.x * this.moveSpeed;
+        this.y += this.direction.y * this.moveSpeed;
+
+        // Bounce off arena walls
+        if (this.x - this.width / 2 < ARENA.x) { this.direction.x = Math.abs(this.direction.x); this.x = ARENA.x + this.width / 2; }
+        if (this.x + this.width / 2 > ARENA.x + ARENA.width) { this.direction.x = -Math.abs(this.direction.x); this.x = ARENA.x + ARENA.width - this.width / 2; }
+        if (this.y - this.height / 2 < ARENA.y) { this.direction.y = Math.abs(this.direction.y); this.y = ARENA.y + this.height / 2; }
+        if (this.y + this.height / 2 > ARENA.y + ARENA.height) { this.direction.y = -Math.abs(this.direction.y); this.y = ARENA.y + ARENA.height - this.height / 2; }
+
+        // Shoot lava globs - only when player not sheltered
+        this.shootTimer += deltaTime;
+        if (this.shootTimer >= this.shootCooldown) {
+            this.shootTimer = 0;
+            if (!playerInShelter) {
+                bossProjectiles.push(new LavaGlob(this.x, this.y, player.x, player.y));
+                bossProjectiles.push(new LavaGlob(this.x, this.y, player.x + 55, player.y + 25));
+                bossProjectiles.push(new LavaGlob(this.x, this.y, player.x - 55, player.y - 25));
+            }
+        }
+
+        this.checkPlayerCollision();
+    }
+
+    draw() {
+        super.draw();
+        const isHit = Date.now() < this.hitFlashUntil;
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // Outer lava glow
+        ctx.shadowColor = isHit ? '#fff' : '#ff5500';
+        ctx.shadowBlur = 22;
+
+        // Rocky body gradient
+        const bodyGrad = ctx.createRadialGradient(-8, -8, 5, 0, 0, this.width / 2);
+        bodyGrad.addColorStop(0, isHit ? '#fff' : '#ff7700');
+        bodyGrad.addColorStop(0.45, isHit ? '#ffcccc' : '#cc2200');
+        bodyGrad.addColorStop(1, isHit ? '#ffbbbb' : '#441100');
+        ctx.fillStyle = bodyGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Lava crack lines
+        ctx.strokeStyle = isHit ? '#fff' : '#ffaa00';
+        ctx.lineWidth = 2.5;
+        for (let i = 0; i < 4; i++) {
+            const a = (i * Math.PI / 2) + this.rockAngle;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(a) * this.width / 2 * 0.75, Math.sin(a) * this.height / 2 * 0.75);
+            ctx.stroke();
+        }
+
+        // Rocky outer edge bumps
+        ctx.fillStyle = isHit ? '#ffaaaa' : '#331100';
+        for (let i = 0; i < 6; i++) {
+            const a = (i * Math.PI / 3) + this.rockAngle * 0.5;
+            const bx = Math.cos(a) * this.width / 2;
+            const by = Math.sin(a) * this.height / 2;
+            ctx.beginPath();
+            ctx.arc(bx, by, 8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.shadowBlur = 0;
+
+        // Eyes - glowing red
+        ctx.fillStyle = isHit ? '#fff' : '#ff2200';
+        ctx.shadowColor = isHit ? '#fff' : '#ff6600';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.ellipse(-13, -10, 9, 7, 0, 0, Math.PI * 2);
+        ctx.ellipse(13, -10, 9, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pupils
+        ctx.fillStyle = '#000';
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.arc(-13, -10, 4, 0, Math.PI * 2);
+        ctx.arc(13, -10, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Angry mouth (snarl)
+        ctx.strokeStyle = isHit ? '#fff' : '#220000';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 12, 16, 0.3, Math.PI - 0.3, true);
+        ctx.stroke();
+        // Teeth
+        ctx.fillStyle = isHit ? '#fff' : '#ddd';
+        for (let t = -1; t <= 1; t++) {
+            ctx.fillRect(t * 9 - 4, 10, 8, 7);
+        }
+
+        ctx.restore();
+    }
+}
+
 // ==================== COLLISION DETECTION ====================
 function checkCollision(obj1, obj2) {
     return obj1.x - obj1.width/2 < obj2.x + obj2.width/2 &&
@@ -2118,14 +2327,17 @@ function showFloatingText(text, x, y) {
 function updateLoseScreen() {
     const loseScreen = document.getElementById('lose-screen');
 
-    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 4) {
+    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 5) {
+        loseScreen.querySelector('p').textContent =
+            'Burned by the Volcano Beast! Try hiding in the house next time?';
+    } else if (previousGameState === GAME_STATES.FIGHT && currentBoss === 4) {
         loseScreen.querySelector('p').textContent =
             'Spit on by the Spider Spit Bus! Use the shelter buses next time?';
     } else if (previousGameState === GAME_STATES.FIGHT && currentBoss === 3) {
         loseScreen.querySelector('p').textContent =
             'Defeated by Mutant Hair! Return to the computer for more hair points?';
     } else if (previousGameState === GAME_STATES.FIGHT) {
-        const bossNames = ['Ninja Street', 'Shaded Hair', 'Swords', 'Mutant Hair', 'Spider Spit Bus'];
+        const bossNames = ['Ninja Street', 'Shaded Hair', 'Swords', 'Mutant Hair', 'Spider Spit Bus', 'Volcano Beast'];
         loseScreen.querySelector('p').textContent =
             `Defeated by ${bossNames[currentBoss]}! Try again?`;
     } else if (previousGameState === GAME_STATES.STREAM_AREA) {
@@ -3154,6 +3366,277 @@ function drawStreamArea() {
     ctx.fillText('Press ESC to return to map', canvas.width/2, canvas.height - 20);
 }
 
+// ==================== MARS WORLD ====================
+function drawMarsHouseShelter() {
+    const h = MARS_FIGHT_HOUSE;
+    const inside = checkCollision(player, h);
+    const lx = h.x - h.width / 2;
+    const ty = h.y - h.height / 2;
+
+    ctx.save();
+
+    // Glow when player inside
+    if (inside) {
+        ctx.shadowColor = '#00ff88';
+        ctx.shadowBlur = 24;
+    }
+
+    // House walls
+    ctx.fillStyle = inside ? '#c4845a' : '#a0522d';
+    ctx.fillRect(lx, ty + 25, h.width, h.height - 25);
+    ctx.strokeStyle = inside ? '#00ff88' : '#5a3010';
+    ctx.lineWidth = inside ? 3 : 2;
+    ctx.strokeRect(lx, ty + 25, h.width, h.height - 25);
+
+    // Roof triangle
+    ctx.shadowBlur = inside ? 16 : 0;
+    ctx.fillStyle = inside ? '#8b4513' : '#5a2d0c';
+    ctx.beginPath();
+    ctx.moveTo(lx - 8, ty + 28);
+    ctx.lineTo(h.x, ty);
+    ctx.lineTo(lx + h.width + 8, ty + 28);
+    ctx.closePath();
+    ctx.fill();
+    if (inside) { ctx.strokeStyle = '#00ff88'; ctx.lineWidth = 2; ctx.stroke(); }
+
+    ctx.shadowBlur = 0;
+
+    // Door (open)
+    ctx.fillStyle = '#2a1000';
+    ctx.fillRect(h.x - 16, ty + 55, 32, h.height - 55);
+
+    // Windows
+    ctx.fillStyle = '#ffe066';
+    ctx.fillRect(lx + 10, ty + 35, 22, 18);
+    ctx.fillRect(lx + h.width - 32, ty + 35, 22, 18);
+
+    // SHELTER label
+    ctx.fillStyle = inside ? '#00ff88' : '#00cc44';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('SHELTER', h.x, ty - 6);
+
+    // Proximity prompt
+    const dx = player.x - h.x;
+    const dy = player.y - h.y;
+    if (Math.sqrt(dx * dx + dy * dy) < 90 && !inside) {
+        ctx.fillStyle = '#00ff88';
+        ctx.font = '11px Arial';
+        ctx.fillText('Walk inside for safety', h.x, ty - 18);
+    }
+
+    ctx.restore();
+}
+
+function drawMarsWorld() {
+    if (showingMarsTransition) {
+        // Full-screen eruption reveal
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ff4400';
+        ctx.font = 'bold 80px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('VOLCANO ERUPTS!', canvas.width / 2, canvas.height / 2 - 20);
+        ctx.fillStyle = '#ffaa00';
+        ctx.font = 'bold 22px Arial';
+        ctx.fillText('The beast is FREE!  Grab your parachute!', canvas.width / 2, canvas.height / 2 + 50);
+        return;
+    }
+
+    // Sky gradient (Mars atmosphere)
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    skyGrad.addColorStop(0, '#8b2500');
+    skyGrad.addColorStop(0.5, '#c84a1c');
+    skyGrad.addColorStop(1, '#9a3a10');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Mars ground
+    ctx.fillStyle = '#7a2e08';
+    ctx.fillRect(0, 370, canvas.width, 230);
+
+    // Ground texture craters
+    ctx.fillStyle = '#5a2004';
+    ctx.beginPath(); ctx.ellipse(220, 385, 45, 13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(660, 405, 28, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(490, 395, 20, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(350, 420, 15, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+    // ---- Volcano (center-right visual) ----
+    // Main mountain body
+    ctx.fillStyle = '#5c1f00';
+    ctx.beginPath();
+    ctx.moveTo(280, 375);
+    ctx.lineTo(570, 55);
+    ctx.lineTo(800, 375);
+    ctx.closePath();
+    ctx.fill();
+
+    // Left slope shading (darker)
+    ctx.fillStyle = '#3d1400';
+    ctx.beginPath();
+    ctx.moveTo(280, 375);
+    ctx.lineTo(570, 55);
+    ctx.lineTo(470, 375);
+    ctx.closePath();
+    ctx.fill();
+
+    // Rock ledges on slope path (visual guide up the volcano)
+    ctx.fillStyle = '#7a3510';
+    for (let i = 0; i < 4; i++) {
+        const t = (i + 1) / 5;
+        const px = 280 + t * (570 - 280);
+        const py = 375 + t * (55 - 375);
+        ctx.fillRect(px - 18, py - 4, 36, 8);
+    }
+
+    // Crater glow at top
+    ctx.shadowColor = '#ff6600';
+    ctx.shadowBlur = 30;
+    ctx.fillStyle = '#ff4400';
+    ctx.beginPath();
+    ctx.ellipse(570, 65, 45, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ff8800';
+    ctx.beginPath();
+    ctx.ellipse(570, 65, 30, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.ellipse(570, 65, 14, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Lava drips
+    ctx.fillStyle = '#ff6600';
+    ctx.fillRect(545, 68, 7, 55);
+    ctx.fillRect(568, 62, 5, 45);
+    ctx.fillRect(583, 70, 6, 38);
+
+    // Button at volcano top (when not pressed)
+    if (!marsButtonPressed) {
+        const pulse = 0.6 + Math.sin(Date.now() * 0.006) * 0.4;
+
+        // Button platform
+        ctx.fillStyle = '#555';
+        ctx.fillRect(552, 90, 36, 12);
+
+        // Button glow
+        ctx.shadowColor = '#ff0000';
+        ctx.shadowBlur = 18 * pulse;
+        ctx.fillStyle = '#cc0000';
+        ctx.beginPath();
+        ctx.ellipse(570, 90, 18, 9, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ff3333';
+        ctx.beginPath();
+        ctx.ellipse(570, 90, 12, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('RELEASE!', 570, 78);
+    }
+
+    // ---- House (left side, shelter) ----
+    // Check proximity first for prompt
+    const houseCenter = { x: 115, y: 305, width: 120, height: 110 };
+    const playerInHouseNow = checkCollision(player, houseCenter);
+
+    // Update global shelter flag for MARS_WORLD
+    playerInShelter = playerInHouseNow;
+
+    if (playerInHouseNow) {
+        ctx.shadowColor = '#00ff88';
+        ctx.shadowBlur = 20;
+    }
+
+    // House walls
+    ctx.fillStyle = playerInHouseNow ? '#c4845a' : '#a0522d';
+    ctx.fillRect(55, 260, 120, 115);
+    ctx.strokeStyle = playerInHouseNow ? '#00ff88' : '#5a3010';
+    ctx.lineWidth = playerInHouseNow ? 3 : 2;
+    ctx.strokeRect(55, 260, 120, 115);
+
+    // Roof
+    ctx.shadowBlur = playerInHouseNow ? 14 : 0;
+    ctx.fillStyle = playerInHouseNow ? '#8b4513' : '#5a2d0c';
+    ctx.beginPath();
+    ctx.moveTo(47, 262);
+    ctx.lineTo(115, 215);
+    ctx.lineTo(183, 262);
+    ctx.closePath();
+    ctx.fill();
+    if (playerInHouseNow) { ctx.strokeStyle = '#00ff88'; ctx.lineWidth = 2; ctx.stroke(); }
+
+    ctx.shadowBlur = 0;
+
+    // Door
+    ctx.fillStyle = '#2a1000';
+    ctx.fillRect(95, 320, 40, 55);
+
+    // Windows
+    ctx.fillStyle = '#ffe066';
+    ctx.fillRect(63, 272, 25, 18);
+    ctx.fillRect(143, 272, 25, 18);
+
+    // SHELTER sign
+    ctx.fillStyle = playerInHouseNow ? '#00ff88' : '#00cc44';
+    ctx.font = 'bold 13px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('SHELTER', 115, 208);
+
+    // Shelter prompt / overlay
+    if (playerInHouseNow) {
+        ctx.fillStyle = 'rgba(0, 220, 100, 0.10)';
+        ctx.fillRect(47, 215, 140, 165);
+        ctx.fillStyle = '#00dd66';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText("SHELTERED — Can't attack from here!", canvas.width / 2, 45);
+    } else {
+        const dx = player.x - 115;
+        const dy = player.y - 305;
+        if (Math.sqrt(dx * dx + dy * dy) < 100) {
+            ctx.fillStyle = '#00ff88';
+            ctx.font = '12px Arial';
+            ctx.fillText('Walk inside for safety', 115, 202);
+        }
+    }
+
+    // Check if player is in the volcano top zone (to press button)
+    const nearButton = !marsButtonPressed &&
+        player.x > 480 && player.x < 660 && player.y > 55 && player.y < 200;
+
+    if (nearButton) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Press SPACE to release the Volcano Beast!', canvas.width / 2, canvas.height - 40);
+
+        if (keys.space && !marsButtonPressed && !showingMarsTransition) {
+            marsButtonPressed = true;
+            showingMarsTransition = true;
+            showFloatingText('Parachute grabbed!', player.x, player.y - 40);
+            setTimeout(() => {
+                showingMarsTransition = false;
+                bossProjectiles = [];
+                playerInShelter = false;
+                player.x = 400;
+                player.y = 325;
+                startBossFight();
+            }, 3000);
+        }
+    }
+
+    // World label
+    ctx.fillStyle = '#ffaa66';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('MARS', canvas.width / 2, 25);
+}
+
 // ==================== BOSS MANAGEMENT ====================
 let boss = null;
 
@@ -3164,6 +3647,7 @@ function createBoss(index) {
         case 2: return new Swords();
         case 3: return new MutantHair();
         case 4: return new SpiderSpitBus();
+        case 5: return new MarsVolcanoBoss();
         default: return null;
     }
 }
@@ -3216,23 +3700,72 @@ function gameLoop() {
             player.update(deltaTime);
             player.draw();
         }
+    } else if (gameState === GAME_STATES.MARS_WORLD) {
+        drawMarsWorld();
+        if (!showingMarsTransition) {
+            player.update(deltaTime);
+            player.draw();
+        }
     } else if (gameState === GAME_STATES.FIGHT) {
-        // Draw arena
-        ctx.strokeStyle = '#ecf0f1';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
-        ctx.fillStyle = '#34495e';
-        ctx.fillRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
+        // Mars boss fight: custom Mars arena background
+        if (currentBoss === 5) {
+            // Mars sky
+            const marsArenaGrad = ctx.createLinearGradient(ARENA.x, ARENA.y, ARENA.x, ARENA.y + ARENA.height);
+            marsArenaGrad.addColorStop(0, '#8b2500');
+            marsArenaGrad.addColorStop(0.55, '#b84a1c');
+            marsArenaGrad.addColorStop(1, '#7a2e08');
+            ctx.fillStyle = marsArenaGrad;
+            ctx.fillRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
 
-        // Draw shelter buses for the Spider Spit Bus fight
-        if (currentBoss === 4) {
-            drawShelterBuses();
+            // Mars ground band at bottom of arena
+            ctx.fillStyle = '#5a2004';
+            ctx.fillRect(ARENA.x, ARENA.y + ARENA.height - 80, ARENA.width, 80);
+
+            // Mini volcano on right side
+            ctx.fillStyle = '#3d1400';
+            ctx.beginPath();
+            ctx.moveTo(ARENA.x + ARENA.width - 180, ARENA.y + ARENA.height - 80);
+            ctx.lineTo(ARENA.x + ARENA.width - 60, ARENA.y + 80);
+            ctx.lineTo(ARENA.x + ARENA.width, ARENA.y + ARENA.height - 80);
+            ctx.closePath();
+            ctx.fill();
+
+            // Crater glow
+            ctx.shadowColor = '#ff6600';
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = '#ff5500';
+            ctx.beginPath();
+            ctx.ellipse(ARENA.x + ARENA.width - 60, ARENA.y + 82, 22, 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Arena border
+            ctx.strokeStyle = '#ff4400';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
+
+            // Draw the house shelter on left side
+            drawMarsHouseShelter();
+        } else {
+            // Standard arena background
+            ctx.strokeStyle = '#ecf0f1';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(ARENA.x, ARENA.y, ARENA.width, ARENA.height);
+
+            // Draw shelter buses for the Spider Spit Bus fight
+            if (currentBoss === 4) {
+                drawShelterBuses();
+            }
         }
 
         if (boss && !boss.defeated) {
             // Check if player is sheltered (before update so attack guard is current)
             if (currentBoss === 4) {
                 playerInShelter = SHELTER_BUSES.some(sb => checkCollision(player, sb));
+            } else if (currentBoss === 5) {
+                playerInShelter = checkCollision(player, MARS_FIGHT_HOUSE);
             } else {
                 playerInShelter = false;
             }
@@ -3264,11 +3797,21 @@ function gameLoop() {
 
 // ==================== EVENT LISTENERS ====================
 document.getElementById('start-button').addEventListener('click', () => {
-    if (currentBoss >= 5) {
+    if (currentBoss >= 6) {
         // Already beaten the game - show win screen
         gameState = GAME_STATES.WIN;
         showScreen('win-screen');
         document.getElementById('final-hair-points').textContent = `Total Hair Points: ${hairPoints}`;
+    } else if (currentBoss === 5) {
+        // Was in or fighting Volcano Beast - send to Mars World
+        marsPhase = 'explore';
+        marsButtonPressed = false;
+        showingMarsTransition = false;
+        playerInShelter = false;
+        player.x = 150;
+        player.y = 380;
+        gameState = GAME_STATES.MARS_WORLD;
+        hideAllScreens();
     } else if (currentBoss === 4) {
         // Was in or fighting Spider Spit Bus - send to school area
         schoolPhase = 'inside';
@@ -3330,7 +3873,10 @@ document.getElementById('restart-button').addEventListener('click', () => {
     player.reset();
     hideAllScreens();
 
-    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 4) {
+    if (previousGameState === GAME_STATES.FIGHT && currentBoss === 5) {
+        // Died against Volcano Beast - retry the fight
+        startBossFight();
+    } else if (previousGameState === GAME_STATES.FIGHT && currentBoss === 4) {
         // Died against Spider Spit Bus - send back to school outside
         schoolPhase = 'outside';
         schoolEntryTime = Date.now();
@@ -3477,6 +4023,11 @@ function resetGame(keepUpgrades = false) {
     showingWarTransition = false;
     bossProjectiles = [];
     playerInShelter = false;
+
+    // Reset Mars world state
+    marsPhase = 'explore';
+    marsButtonPressed = false;
+    showingMarsTransition = false;
 
     if (!keepUpgrades) {
         // Full reset - lose everything
