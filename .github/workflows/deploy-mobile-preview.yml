@@ -37,4 +37,4 @@ jobs:
           git add mobile-test/
           git diff --staged --quiet \
             && echo "No changes to deploy." \
-            || (git commit -m "chore: update mobile-test preview [skip ci]" && git push origin main)
+            || (git commit -m "chore: update mobile-test preview" && git push origin main)
