@@ -504,6 +504,10 @@ const flamethrowerSprite = new Image();
 flamethrowerSprite.src = 'sprites/flamethrower.png';
 const volcanoMonsterSprite = new Image();
 volcanoMonsterSprite.src = 'sprites/volcanomonster.png';
+const shipSprite = new Image();
+shipSprite.src = 'sprites/ship.png';
+const mathClassSprite = new Image();
+mathClassSprite.src = 'sprites/mathclass.png';
 
 // ==================== PLAYER ====================
 const player = {
@@ -3116,56 +3120,10 @@ function drawSchoolArea() {
 }
 
 function drawSchoolInterior() {
-    // Classroom wall
-    ctx.fillStyle = '#e8d5b7';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Math classroom background sprite (scaled to canvas)
+    ctx.drawImage(mathClassSprite, 0, 0, canvas.width, canvas.height);
 
-    // Floor
-    ctx.fillStyle = '#c8a87a';
-    ctx.fillRect(0, 440, canvas.width, 160);
-
-    // Blackboard
-    ctx.fillStyle = '#2d5a27';
-    ctx.fillRect(150, 40, 500, 140);
-    ctx.strokeStyle = '#5c3a1e';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(146, 36, 508, 148);
-    // Chalk text
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 26px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('MATH CLASS', canvas.width / 2, 90);
-    ctx.font = '18px Arial';
-    ctx.fillText('2 + 2 = 4     3 × 3 = 9', canvas.width / 2, 125);
-    ctx.fillText('No talking during class!', canvas.width / 2, 155);
-
-    // Desks (3 rows × 4 cols)
-    ctx.fillStyle = '#8B6914';
-    for (let row = 0; row < 3; row++) {
-        for (let col = 0; col < 4; col++) {
-            ctx.fillRect(100 + col * 165, 240 + row * 65, 65, 38);
-            // Desk leg
-            ctx.fillStyle = '#5a4010';
-            ctx.fillRect(115 + col * 165, 276, 8, 12);
-            ctx.fillRect(148 + col * 165, 276, 8, 12);
-            ctx.fillStyle = '#8B6914';
-        }
-    }
-
-    // Teacher
-    ctx.fillStyle = '#3a5a8a';
-    ctx.fillRect(355, 200, 35, 50); // Body
-    ctx.fillStyle = '#fdbcb4';
-    ctx.beginPath();
-    ctx.arc(372, 192, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#333';
-    ctx.beginPath();
-    ctx.arc(367, 188, 3, 0, Math.PI * 2);
-    ctx.arc(378, 188, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Door at bottom center
+    // Door at bottom center (keep interactive element)
     ctx.fillStyle = '#7a4a20';
     ctx.fillRect(360, 455, 80, 105);
     ctx.strokeStyle = '#5a3010';
@@ -3680,11 +3638,12 @@ function drawShipArea() {
     ctx.fillStyle = '#0288d1';
     ctx.fillRect(0, 400, canvas.width, 200);
 
-    // Ship
-    ctx.fillStyle = questState.shipRepaired ? '#8d6e63' : '#5d4037';
-    ctx.fillRect(ship.x, ship.y, ship.width, ship.height);
-    ctx.fillStyle = '#6d4c41';
-    ctx.fillRect(ship.x + 40, ship.y - 30, 20, 40);
+    // Ship sprite
+    ctx.drawImage(shipSprite, ship.x - 20, ship.y - 40, 160, 120);
+    if (!questState.shipRepaired) {
+        ctx.fillStyle = 'rgba(139,69,19,0.45)';
+        ctx.fillRect(ship.x - 20, ship.y - 40, 160, 120);
+    }
 
     // Ship status text
     ctx.fillStyle = '#000';
